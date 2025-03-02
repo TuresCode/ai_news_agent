@@ -46,5 +46,4 @@ python main.py --topic "Climate Change"
 python main.py --topic "Technology" --output file
 
 # Save output to a custom file
-python main.py --topic "Sports" --output file --output-file "sports_news.md"
 ```

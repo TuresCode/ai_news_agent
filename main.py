@@ -12,16 +12,16 @@ current_date = datetime.now().strftime("%Y-%m")
 client = Swarm()
 
 
-def get_news_articles(topic, *args):
+def get_news_articles(topic=None, **kwargs):
     """
     Duckduckgo search based on topic.
-    Added *args to handle any additional parameters the agent might try to pass
     """
-    # Ensure topic is a string and handle cases where it might be passed as a dict or with date
+    # Ensure topic is a string
     if isinstance(topic, dict):
         topic = topic.get("topic", "")
     elif isinstance(topic, str) and current_date in topic:
         topic = topic.replace(current_date, "").strip()
+
     print(f"Using Duckduckgo search for: {topic}")
     ddg_api = DDGS()
     results = ddg_api.text(f"{topic} {current_date}", max_results=5)
@@ -29,19 +29,19 @@ def get_news_articles(topic, *args):
     if not results:
         return f"Could not find news results for {topic}."
 
-    # Store URLs separately to maintain order
-    urls = []
+    # Format articles with URLs included
     formatted_articles = []
-
     for result in results:
-        urls.append(result["href"])
-        article = f"Title: {result['title']}\n" f"Description: {result['body']}"
+        article = (
+            f"Title: {result['title']}\n"
+            f"Description: {result['body']}\n"
+            f"URL_EXACT: {result['href']}\n"
+        )
         formatted_articles.append(article)
 
     # Join articles with clear separators
     news_text = "\n\n===ARTICLE===\n".join(formatted_articles)
-
-    return {"text": news_text, "urls": urls}
+    return news_text
 
 
 # News Agent to fetch news
@@ -55,18 +55,15 @@ news_agent = Agent(
 # Editor Agent to edit news
 editor_agent = Agent(
     name="Editor Assistant",
-    instructions="""Rewrite the news articles in a publishing-ready format. 
-    For each article:
-    1. Create a clear headline
-    2. Summarize the content
+    instructions="""Rewrite the news articles into one publishing-ready article.
+    For each article, look for the line starting with 'URL_EXACT:' and use that EXACT URL (don't modify it).
 
     Format each article as:
-
-    ## [HEADLINE]
-    [Your summarized content]
+        ## [HEADLINE]
+        [PASTE THE EXACT URL HERE, removing the 'URL_EXACT:' prefix]
+        [Your summarized content]
 
     In the end write:
-
     ***Key Takeaways***
     [Your key takeaways content]
 
@@ -80,14 +77,18 @@ editor_agent = Agent(
 def run_news_workflow(topic):
     print("Running news Agent workflow...")
 
-    # Step 1: Fetch news
-    news_data = get_news_articles(topic)
+    # Step 1: Fetch news using the news_agent
+    news_response = client.run(
+        agent=news_agent,
+        messages=[{"role": "user", "content": f"Get me the latest news about {topic}"}],
+    )
 
-    if isinstance(news_data, str):  # Error message
-        return news_data
+    # Extract the news content from the response
+    raw_news = news_response.messages[-1]["content"]
 
-    raw_news = news_data["text"]
-    urls = news_data["urls"]
+    # Check if we got an error message
+    if "Could not find news results" in raw_news:
+        return raw_news
 
     # Step 2: Pass news to editor
     edited_news_response = client.run(
@@ -97,50 +98,39 @@ def run_news_workflow(topic):
 
     edited_news = edited_news_response.messages[-1]["content"]
 
-    # Add URLs to headlines
-    lines = edited_news.split("\n")
-    url_index = 0
-
-    for i, line in enumerate(lines):
-        if line.startswith("##") and url_index < len(urls):
-            lines[i] = f"{line} (Source: {urls[url_index]})"
-            url_index += 1
-
-    return "\n".join(lines)
+    return edited_news
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description='Fetch and process news articles on specified topics.'
+        description="Fetch and process news articles on specified topics."
     )
     parser.add_argument(
-        '--topic', 
-        type=str, 
-        default='AI',
-        help='Topic to search for news (default: AI)'
+        "--topic", type=str, default="AI", help="Topic to search for news (default: AI)"
     )
     parser.add_argument(
-        '--output', 
-        type=str, 
-        choices=['print', 'file'],
-        default='print',
-        help='Output method: print to console or save to file (default: print)'
+        "--output",
+        type=str,
+        choices=["print", "file"],
+        default="print",
+        help="Output method: print to console or save to file (default: print)",
     )
     parser.add_argument(
-        '--output-file', 
-        type=str, 
-        default='news_output.txt',
-        help='Output file name when using file output (default: news_output.txt)'
+        "--output-file",
+        type=str,
+        default="news_output.txt",
+        help="Output file name when using file output (default: news_output.txt)",
     )
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_arguments()
     results = run_news_workflow(args.topic)
 
-    if args.output == 'print':
+    if args.output == "print":
         print(results)
     else:
-        with open(args.output_file, 'w', encoding='utf-8') as f:
+        with open(args.output_file, "w", encoding="utf-8") as f:
             f.write(results)
         print(f"Results saved to {args.output_file}")
